@@ -254,21 +254,61 @@ function convertChineseLanguageCode(language) {
   return language;
 }
 
+function getRandomUserAgent() {
+  const UA_list = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  ];
+  return UA_list[Math.floor(Math.random() * UA_list.length)];
+}
+
+
+// 解析Cookies函数
+function parseCookies(setCookieHeader) {
+  return setCookieHeader.split(',').map(cookie => {
+    // 只取每个cookie的第一部分（即"name=value"部分）
+    return cookie.split(';')[0].trim();
+  }).join('; ');
+}
+
 /**
  * 翻译函数
- * @param \{string} text - 待翻译的文本
- * @param \{string} from - 源语言代码
- * @param \{string} to - 目标语言代码
- * @param \{Object} options - 选项对象
- * @param \{Object} options.config - 配置对象
- * @param \{Object} options.utils - 工具对象
- * @param \{Function} options.utils.tauriFetch - Tauri的fetch函数
- * @param \{Object} options.utils.CryptoJS - CryptoJS模块
- * @returns \{Promise<string>} - 翻译结果
+ * @param {string} text - 待翻译的文本
+ * @param {string} from - 源语言代码
+ * @param {string} to - 目标语言代码
+ * @param {Object} options - 选项对象
+ * @returns {Promise<string>} - 翻译结果
  */
 async function translate(text, from, to, options) {
-  const { config, utils } = options;
-  const { tauriFetch: fetch, CryptoJS } = utils;
+  const { utils } = options;
+  const { http } = utils;
+  const { fetch } = http;
+
+  // 获取Cookies
+  const initURL = "https://fanyi.sogou.com/";
+  const use_UA = getRandomUserAgent();
+  // console.log("User-Agent:", use_UA);
+  const responseInit = await fetch(initURL, {
+    method: "GET",
+    headers: {
+      "User-Agent": use_UA
+    },
+    responseType: http.ResponseType.Text
+  });
+
+  if (!responseInit.ok) {
+    throw new Error(`Failed to fetch cookies, status: ${responseInit.status}`);
+  }
+
+  const setCookieHeader = responseInit.headers.get("set-cookie");
+  const cookies = parseCookies(setCookieHeader);
+  // console.log("Parsed cookies:", cookies);
+
+  const URL = "https://fanyi.sogou.com/api/transpc/text/result";
 
   // 转换目标语言代码
   to = convertChineseLanguageCode(to);
@@ -279,35 +319,46 @@ async function translate(text, from, to, options) {
     throw new Error("CalSign error: Unable to calculate the sign.");
   }
 
+  // 构建请求体为 JSON 格式
+  const body = JSON.stringify({
+    "client": "pc",
+    "exchange": false,
+    "fr": "browser_pc",
+    "from": "auto",
+    "needQc": 1,
+    "s": sign,
+    "text": text,
+    "to": to
+  });
+
   // 发送翻译请求
-  const payload = {
-    client: "pc",
-    exchange: false,
-    fr: "browser_pc",
-    from: "auto",
-    needQc: 1,
-    s: sign,
-    text: text,
-    to: to
-  };
-
-  const headers = {
-    "Content-Type": "application/json",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-  };
-
   try {
-    const response = await fetch("https://fanyi.sogou.com/api/transpc/text/result", {
+    const response = await fetch(URL, {
       method: "POST",
-      headers: headers,
-      body: payload
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "User-Agent": use_UA,
+        "Cookie": cookies
+      },
+      body: body
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`Request HTTP error! status: ${response.status}`);
     }
 
-    const data = response.data;
+    // console.log("response", response);
+
+    try {
+      const data = await response.json();
+      // 处理JSON数据
+    } catch (error) {
+      const text = await response.text();  // 获取原始响应文本进行错误处理或日志记录
+      console.error("Failed to parse JSON, raw response: ", text);
+    }
+
+    // console.log("data", data);
 
     // 提取翻译结果
     const result = data?.data?.translate?.dit;
@@ -317,6 +368,13 @@ async function translate(text, from, to, options) {
 
     return result;
   } catch (error) {
-    throw new Error(`ReadResp error: ${error.message}`);
+    throw new Error(`Read Response error: ${error.message}`);
   }
 }
+
+
+// tranlate as a function
+// solve TypeError: translate is not a function
+// module.exports = {
+//   translate
+// };
